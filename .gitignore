@@ -3,12 +3,16 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.py312/
 *.egg-info/
 
 # 데이터/인덱스 (대용량·재생성 가능)
 vectorstore/
 data/processed/
 *.pkl
+
+# 에디터
+.vscode/
 
 # OS
 .DS_Store
