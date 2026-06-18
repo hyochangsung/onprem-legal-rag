@@ -1,0 +1,18 @@
+# 원격 생성 오버라이드 — Colab(외부 GPU)의 Ollama로 "생성"만 처리.
+#
+# ⚠️ 주의: 검색된 규정 조문이 프롬프트에 담겨 외부(구글 클라우드)로 전송된다.
+#          CLAUDE.md 1번 "온프레미스 + 외부 API 금지"와 충돌하므로
+#          반드시 연구·실험 단계에서만 사용할 것. 실서비스는 로컬로 복귀.
+#
+# 사용법:
+#   1) colab/colab_ollama_server.ipynb 를 Colab에서 실행해 '터널 URL'을 얻는다.
+#   2) 아래 endpoint 를 그 URL 로 교체한다(끝에 '/' 없이).
+#   3) generation.model 을 Colab에서 pull 해 둔 모델명과 일치시킨다.
+#   4) python scripts/serve_chat.py --config config/experiments/remote_colab.yaml
+#
+# 임베딩·검색·벡터DB는 그대로 로컬에서 동작한다(여기서 바꾸는 것은 생성뿐).
+
+generation:
+  model: qwen2.5:14b   # Colab에서 받아둔 모델명과 동일하게
+  endpoint: https://wifi-surgeons-weddings-timeline.trycloudflare.com # ← 매 세션 갱신
+  request_timeout: 600

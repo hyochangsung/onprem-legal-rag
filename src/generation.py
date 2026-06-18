@@ -56,6 +56,45 @@ def generate(config: dict[str, Any], prompt: str) -> str:
     return result.get("response", "")
 
 
+def generate_stream(config: dict[str, Any], prompt: str):
+    """프롬프트를 로컬 LLM에 보내 생성 토큰을 스트리밍으로 yield한다.
+
+    Ollama는 stream=True일 때 줄 단위 JSON(NDJSON)을 흘려보낸다. 각 줄의
+    "response" 조각을 그대로 흘려보내 챗봇 화면에서 타이핑처럼 보이게 한다.
+    """
+    gen = config["generation"]
+    if gen["backend"] != "ollama":
+        raise NotImplementedError(f"지원하지 않는 backend: {gen['backend']}")
+
+    endpoint = gen["endpoint"].rstrip("/")
+    payload = {
+        "model": gen["model"],
+        "prompt": prompt,
+        "stream": True,
+        "think": False,
+        "options": {
+            "temperature": gen["temperature"],
+            "num_predict": gen["max_tokens"],
+        },
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{endpoint}/api/generate", data=data, headers={"Content-Type": "application/json"}
+    )
+    request_timeout = gen.get("request_timeout", 600)
+    with urllib.request.urlopen(req, timeout=request_timeout) as resp:
+        for raw in resp:
+            raw = raw.strip()
+            if not raw:
+                continue
+            obj = json.loads(raw.decode("utf-8"))
+            chunk = obj.get("response", "")
+            if chunk:
+                yield chunk
+            if obj.get("done"):
+                break
+
+
 def build_answer_prompt(question: str, context_articles: list[str]) -> str:
     """검색된 조 전체를 컨텍스트로 최종 답변 프롬프트를 구성한다."""
     context = "\n\n---\n\n".join(context_articles)

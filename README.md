@@ -30,7 +30,7 @@
 llmagent-pjt/
 ├── config/
 │   ├── default.yaml                # 모든 실험 변수의 기준값
-│   └── experiments/                # 실험별 오버라이드만 담음 (exp1~exp4)
+│   └── experiments/                # 실험별 오버라이드만 담음 (exp1~exp4, remote_colab)
 ├── data/
 │   ├── raw/regulations.md          # 원본 규정집 (구조화 MD)
 │   ├── processed/chunks.jsonl      # 청킹 산출물 (gitignore)
@@ -41,11 +41,14 @@ llmagent-pjt/
 │   ├── indexing.py                 # 임베딩→Qdrant, BM25 통계
 │   ├── retrieval.py                # BM25+벡터, RRF, 메타필터, 리랭커
 │   ├── generation.py               # 로컬 LLM(Ollama) 답변 생성
-│   └── evaluation.py               # Hit Rate@k, MRR, 답변 채점
+│   ├── evaluation.py               # Hit Rate@k, MRR, 답변 채점
+│   └── trace.py                    # 챗봇 데모용 — 검색 전 과정(임베딩·매칭·프롬프트) 추적
 ├── scripts/
 │   ├── build_index.py              # 청킹 + 인덱싱 1회 실행
 │   ├── run_query.py                # 질문 1개 → 검색 → 답변 (수동 확인용)
-│   └── run_experiment.py           # 평가셋 전체 실행 + 결과표 누적
+│   ├── run_experiment.py           # 평가셋 전체 실행 + 결과표 누적
+│   └── serve_chat.py               # 챗봇 데모 서버 (검색 과정 시각화, §4.4)
+├── web/index.html                  # serve_chat.py가 서빙하는 단일 페이지 UI
 ├── tests/                          # 단계별 단위 테스트
 ├── results/                        # 실험 결과표 (gitignore되지 않음, 누적)
 ├── vectorstore/                    # Qdrant 영속화 (로컬 파일 임베디드 모드, gitignore)
@@ -110,6 +113,28 @@ python scripts/run_experiment.py --label baseline --judge               # 답변
 ```
 
 결과는 `results/summary.md`·`summary.csv`에 누적되고, 질문별 상세는 `results/<label>_per_question.csv`에 저장됩니다.
+
+### 4.4 챗봇 데모 서버 (검색 과정 시각화)
+
+```bash
+python scripts/serve_chat.py                     # 로컬 설정으로 http://localhost:8000
+python scripts/serve_chat.py --port 8080 --config config/experiments/exp1_retrieval.yaml
+```
+
+로컬 GPU(T600 4GB 등)가 약해 생성이 느릴 때는, Colab의 외부 GPU에서 Ollama를 띄우고
+생성만 그쪽으로 위임하는 오버라이드를 쓸 수 있습니다.
+
+```bash
+python scripts/serve_chat.py --config config/experiments/remote_colab.yaml
+```
+
+> ⚠️ **주의**: 이 오버라이드는 검색된 규정 조문이 프롬프트에 담겨 외부(Google Colab)로 전송되므로
+> `CLAUDE.md` 1번의 "온프레미스 + 외부 API 금지" 원칙과 충돌합니다. **연구·실험 단계에서만** 사용하고
+> 실서비스에는 로컬 설정으로 복귀해야 합니다. 사용 전 `config/experiments/remote_colab.yaml`의
+> `colab/colab_ollama_server.ipynb` 터널 URL(`endpoint`)이 매 세션 갱신되었는지 확인하세요.
+
+선행 조건은 4.1의 인덱스 빌드와 동일합니다. 답변 생성을 쓰려면 로컬이든 Colab이든 Ollama가 응답 가능해야 하며,
+없어도 검색 과정(`/api/retrieve`)은 화면에 그대로 표시됩니다.
 
 ---
 

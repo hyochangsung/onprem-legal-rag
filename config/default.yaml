@@ -51,7 +51,8 @@ ann:
 # 생성 (로컬 LLM)
 generation:
   backend: ollama           # 모델을 띄우는 서빙 소프트웨어 (온프레미스·구동 단순)
-  model: qwen2.5:7b-instruct  # backend가 실제로 띄우는 LLM (자원 넉넉하면 qwen2.5:14b-instruct)
+  model: qwen2.5:3b-instruct  # backend가 실제로 띄우는 LLM. T600(4GB VRAM) 기준 3b가 GPU에 100% 적재돼 빠름.
+                              # 7b-instruct는 5.1GB라 CPU/GPU 분할(~55/45)되어 매우 느림. 자원 넉넉하면 7b/14b.
   endpoint: http://localhost:11434
   temperature: 0.0
   max_tokens: 1024
