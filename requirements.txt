@@ -5,8 +5,8 @@
 # 설정 로딩
 PyYAML==6.0.3
 
-# 벡터 DB (로컬·소규모)
-chromadb==1.5.9
+# 벡터 DB (로컬·소규모, 파일 임베디드 모드 — 서버 불필요)
+qdrant-client==1.18.0
 
 # 임베딩 / 리랭커 (cross-encoder)
 sentence-transformers==5.6.0

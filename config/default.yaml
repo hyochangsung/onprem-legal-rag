@@ -9,7 +9,7 @@ seed: 42
 paths:
   raw_dir: data/raw                       # 원본 규정집 (구조화 MD/텍스트)
   chunks_path: data/processed/chunks.jsonl  # 청킹 산출물
-  vectorstore_dir: vectorstore            # Chroma 영속화 위치
+  vectorstore_dir: vectorstore            # Qdrant 영속화 위치 (로컬 파일 임베디드 모드)
   bm25_path: vectorstore/bm25.pkl         # BM25 코퍼스 통계 영속화
   eval_path: data/eval/qa_set.jsonl       # 질문-정답 평가셋
   results_dir: results                    # 실험 결과표 누적
@@ -27,7 +27,6 @@ embedding:
 
 # 인덱싱
 indexing:
-  hypothetical_questions: true   # 가상 질문 인덱싱 on/off (일상어 질문 대응)
   collection_name: regulations
 
 # 검색 (실험1·실험3)

@@ -3,9 +3,7 @@
 온프레미스 제약: 외부 LLM API 금지. 로컬 Ollama 엔드포인트만 사용한다.
 표준 라이브러리(urllib)만으로 Ollama HTTP API를 호출해 의존성을 최소화한다.
 
-이 모듈은 두 곳에서 쓰인다.
-  - 인덱싱: 가상 질문 생성(src.indexing.generate_hypothetical_questions)
-  - 검색 후: 검색된 조 전체를 컨텍스트로 최종 답변 생성
+검색된 조 전체를 컨텍스트로 최종 답변을 생성하며, --judge 채점에서도 심판 LLM 호출에 쓰인다.
 
 LLM이 아직 구동되지 않았을 수 있으므로, is_backend_available로 가용성을 먼저 확인한다.
 """

@@ -41,8 +41,7 @@ def main() -> None:
 
     print("[2/2] 인덱싱...")
     stats = indexing.run(config)
-    print(f"  검색 단위={stats['search_units']}, parent lookup={stats['parents']}, "
-          f"가상질문={stats['hypothetical_questions']}")
+    print(f"  검색 단위={stats['search_units']}, parent lookup={stats['parents']}")
     print("완료. 벡터 색인:", config["paths"]["vectorstore_dir"],
           "| BM25:", config["paths"]["bm25_path"])
 

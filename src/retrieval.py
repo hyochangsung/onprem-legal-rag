@@ -41,11 +41,25 @@ def _load_parents(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _get_collection(config: dict[str, Any]):
-    import chromadb
+# Qdrant 로컬 모드는 디스크 락을 잡으므로, 클라이언트를 프로세스당 1개만 열어 재사용한다.
+_qdrant_client_cache: dict[str, Any] = {}
 
-    client = chromadb.PersistentClient(path=config["paths"]["vectorstore_dir"])
-    return client.get_collection(config["indexing"]["collection_name"])
+
+def _get_qdrant_client(config: dict[str, Any]):
+    from qdrant_client import QdrantClient
+
+    persist_dir = config["paths"]["vectorstore_dir"]
+    if persist_dir not in _qdrant_client_cache:
+        _qdrant_client_cache[persist_dir] = QdrantClient(path=persist_dir)
+    return _qdrant_client_cache[persist_dir]
+
+
+def _build_qdrant_filter(where: dict | None):
+    if not where:
+        return None
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+    return Filter(must=[FieldCondition(key=k, match=MatchValue(value=v)) for k, v in where.items()])
 
 
 # ---------------------------------------------------------------------------
@@ -55,13 +69,16 @@ def _vector_search(
     config: dict[str, Any], query: str, k: int, where: dict | None
 ) -> list[tuple[str, dict]]:
     """벡터 검색 결과를 (search_unit_id, metadata) 순위 리스트로 반환."""
-    col = _get_collection(config)
-    qemb = indexing.encode_queries(config, [query])
-    kwargs: dict[str, Any] = {"query_embeddings": qemb, "n_results": k}
-    if where:
-        kwargs["where"] = where
-    res = col.query(**kwargs)
-    return list(zip(res["ids"][0], res["metadatas"][0]))
+    client = _get_qdrant_client(config)
+    qemb = indexing.encode_queries(config, [query])[0]
+    hits = client.query_points(
+        collection_name=config["indexing"]["collection_name"],
+        query=qemb,
+        limit=k,
+        query_filter=_build_qdrant_filter(where),
+        with_payload=True,
+    ).points
+    return [(str(h.id), h.payload) for h in hits]
 
 
 def _bm25_search(
@@ -92,7 +109,7 @@ def _meta_match(meta: dict, where: dict) -> bool:
 # 조(parent) 단위 순위 환원 + RRF
 # ---------------------------------------------------------------------------
 def _to_parent_ranking(hits: list[tuple[str, dict]]) -> list[str]:
-    """검색 히트(항/가상질문)를 조(parent_id) 순위로 환원(첫 등장=최고 순위)."""
+    """검색 히트(항)를 조(parent_id) 순위로 환원(첫 등장=최고 순위)."""
     seen: set[str] = set()
     ranking: list[str] = []
     for _uid, meta in hits:

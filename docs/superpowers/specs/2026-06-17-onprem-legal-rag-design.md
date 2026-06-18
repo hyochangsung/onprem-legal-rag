@@ -36,7 +36,7 @@
 > 노트북 중심(B)은 재현성·변인 통제 원칙과 충돌하여 배제.
 > 프레임워크 의존(C, LlamaIndex/Haystack)은 법조문 전용 파싱·Parent-Child·RRF 튜닝
 > 커스터마이즈가 번거롭고 온프레미스 의존성 최소화 원칙과 어긋나 배제.
-> 단, 부품 라이브러리(Chroma, rank_bm25, sentence-transformers)는 그대로 활용한다.
+> 단, 부품 라이브러리(Qdrant, rank_bm25, sentence-transformers)는 그대로 활용한다.
 
 "모듈형"의 범위: 마이크로서비스가 아니라 `src/`를 단계별 파일로 나누고 각 파일이
 config를 입력받는 가벼운 수준. 100쪽 규모에 맞게 경량으로 구성.
@@ -66,7 +66,7 @@ llmagent-pjt/
 ├── src/
 │   ├── config.py                   # YAML 로더 (default + 실험 오버라이드 병합), 시드 고정
 │   ├── chunking.py                 # 편-장-절-조-항 파서, Parent-Child, 표 요약 부착
-│   ├── indexing.py                 # 임베딩→Chroma, BM25 통계, 가상질문 인덱싱, 메타데이터 저장
+│   ├── indexing.py                 # 임베딩→Qdrant, BM25 통계, 가상질문 인덱싱, 메타데이터 저장
 │   ├── retrieval.py                # BM25+벡터, RRF 결합, 메타데이터 필터, cross-encoder 리랭크
 │   ├── generation.py               # 로컬 LLM 답변 생성 (조 전체 컨텍스트 주입)
 │   └── evaluation.py               # Hit Rate@k, MRR, RAGAS
@@ -76,7 +76,7 @@ llmagent-pjt/
 │   └── run_experiment.py           # config 받아 평가셋 전체 돌리고 결과표 출력
 ├── results/                        # 실험 결과 표 (csv/md), 실험마다 누적
 ├── tests/                          # 단계별 단위 테스트
-├── vectorstore/                    # Chroma 영속화 (gitignore)
+├── vectorstore/                    # Qdrant 영속화 (gitignore)
 ├── requirements.txt
 └── .gitignore
 ```
@@ -99,7 +99,7 @@ llmagent-pjt/
 
 ### 4.2 indexing.py
 > "Hybrid"는 검색 시점의 결합 방식이고, 인덱싱은 그 Hybrid가 쓸 색인 2개를 각각 준비한다.
-- **벡터 색인**: 청크 임베딩(기본 Snowflake/snowflake-arctic-embed-l-v2.0) → Chroma 저장.
+- **벡터 색인**: 청크 임베딩(기본 Snowflake/snowflake-arctic-embed-l-v2.0) → Qdrant 저장.
 - **BM25용 코퍼스 통계 사전 계산**: 한국어 토큰화 + 청크별 단어 빈도/IDF/길이 통계 계산 후
   영속화(pickle). (수백~수천 청크라 속도용 역색인이 목적이 아니라, 코퍼스 통계를 1회 계산해
   매 질문마다 재사용하기 위함.)
@@ -136,7 +136,7 @@ llmagent-pjt/
                               |
                          indexing
                     /                \
-            [Chroma 벡터색인]   [BM25 통계 + 가상질문 벡터]
+            [Qdrant 벡터색인]   [BM25 통계 + 가상질문 벡터]
                     \                /
    [질문] --embed--> retrieval(벡터 + BM25 --RRF--> 필터 --리랭크)
                               |
@@ -171,7 +171,7 @@ llmagent-pjt/
 | --- | --- | --- |
 | 0. 스캐폴딩 & config 골격 | 폴더, requirements, config.py, default.yaml | config 병합 로더, 시드 고정, 변수 자리 정의 |
 | 1. 청킹 | chunking.py, chunks.jsonl | 조-항 파서, Parent-Child, 표 요약, 메타데이터 |
-| 2. 인덱싱 | indexing.py, vectorstore/, BM25 통계 | 임베딩→Chroma, BM25 통계, 가상질문 인덱싱 |
+| 2. 인덱싱 | indexing.py, vectorstore/, BM25 통계 | 임베딩→Qdrant, BM25 통계, 가상질문 인덱싱 |
 | 3. 검색 | retrieval.py | 벡터+BM25, RRF 결합, 메타 필터, 리랭커 |
 | 4. 로컬 LLM + 생성 | generation.py | Ollama 구축, 조 전체 주입 답변 생성 |
 | 5. 평가셋 구축 | qa_set.jsonl (50개) | 질문-정답, 유형 태그, 근거 조 id |
@@ -205,7 +205,7 @@ llmagent-pjt/
 ## 10. 기술 스택
 
 - 언어: Python
-- 벡터 DB: Chroma (로컬·소규모)
+- 벡터 DB: Qdrant (로컬 파일 임베디드 모드, 서버 불필요·소규모)
 - Sparse: rank_bm25 + 한국어 토크나이저
 - 임베딩/리랭커: sentence-transformers (cross-encoder)
 - 로컬 LLM 서빙: Ollama (권장)

@@ -1,11 +1,10 @@
-"""인덱싱 — 벡터 색인(Chroma) + BM25 통계 + (옵션) 가상 질문 인덱싱.
+"""인덱싱 — 벡터 색인(Qdrant, 로컬 파일 임베디드 모드) + BM25 통계.
 
 설계 원칙(CLAUDE.md):
   - "Hybrid"는 검색 시점의 결합 방식. 인덱싱은 그 Hybrid가 쓸 색인 2개를 각각 준비한다.
-      1) 벡터 색인 : 검색 단위(항/조)를 임베딩해 Chroma에 저장
+      1) 벡터 색인 : 검색 단위(항/조)를 임베딩해 Qdrant에 저장 (서버 없이 path=로 디스크에 영속화)
       2) BM25 통계 : 검색 단위를 한국어 토큰화해 코퍼스 통계를 1회 계산 후 영속화
   - parent(조 전체)는 검색 대상이 아니라, 검색된 child를 조 전체로 확장하기 위한 lookup으로 저장.
-  - 가상 질문 인덱싱(옵션): child가 답이 되는 질문을 로컬 LLM으로 생성해 별도 벡터로 추가.
 
 질문과 문서는 반드시 동일한 임베딩 모델로 변환해야 하므로, 임베딩 함수는
 retrieval 단계에서도 재사용할 수 있도록 여기서 제공한다(encode_documents/encode_queries).
@@ -107,10 +106,10 @@ def split_search_and_parents(
 
 
 # ---------------------------------------------------------------------------
-# 벡터 색인 (Chroma)
+# 벡터 색인 (Qdrant, 로컬 파일 임베디드 모드)
 # ---------------------------------------------------------------------------
 def _clean_meta(meta: dict[str, Any]) -> dict[str, Any]:
-    """Chroma 메타데이터는 primitive만 허용. None은 빈 문자열로 치환."""
+    """Qdrant payload는 JSON 직렬화 가능한 값만 허용. None은 빈 문자열로 치환."""
     out: dict[str, Any] = {}
     for k, v in meta.items():
         out[k] = "" if v is None else v
@@ -120,52 +119,36 @@ def _clean_meta(meta: dict[str, Any]) -> dict[str, Any]:
 def build_vector_index(
     config: dict[str, Any],
     search_units: list[dict[str, Any]],
-    hyq: list[dict[str, Any]] | None = None,
 ) -> None:
-    """검색 단위(+ 가상질문)를 임베딩해 Chroma에 저장한다."""
-    import chromadb
+    """검색 단위를 임베딩해 Qdrant(로컬 파일 임베디드 모드)에 저장한다."""
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import Distance, PointStruct, VectorParams
 
     persist_dir = config["paths"]["vectorstore_dir"]
     collection_name = config["indexing"]["collection_name"]
     Path(persist_dir).mkdir(parents=True, exist_ok=True)
 
-    client = chromadb.PersistentClient(path=persist_dir)
-    # 재빌드 시 기존 컬렉션 초기화(임베딩 모델·청킹이 바뀌면 다시 만들어야 함)
-    try:
-        client.delete_collection(collection_name)
-    except Exception:
-        pass
-    collection = client.create_collection(collection_name, metadata={"hnsw:space": "cosine"})
-
-    ids = [u["id"] for u in search_units]
     docs = [u["text"] for u in search_units]
-    metas = []
-    for u in search_units:
+    embeddings = encode_documents(config, docs)
+
+    client = QdrantClient(path=persist_dir)
+    # 재빌드 시 기존 컬렉션 초기화(임베딩 모델·청킹이 바뀌면 다시 만들어야 함)
+    if client.collection_exists(collection_name):
+        client.delete_collection(collection_name)
+    client.create_collection(
+        collection_name,
+        vectors_config=VectorParams(size=len(embeddings[0]), distance=Distance.COSINE),
+    )
+
+    points = []
+    for idx, (u, emb) in enumerate(zip(search_units, embeddings)):
         m = _clean_meta(u["metadata"])
         m["chunk_type"] = u["type"]
         m["parent_id"] = u.get("parent_id", u["id"])  # article은 자기 자신이 parent
-        m["is_hyq"] = False
-        metas.append(m)
-    embeddings = encode_documents(config, docs)
-
-    # 가상 질문 벡터(있으면) 추가 — 원본 child로 역참조
-    if hyq:
-        q_ids = [h["id"] for h in hyq]
-        q_docs = [h["text"] for h in hyq]
-        q_metas = []
-        for h in hyq:
-            m = _clean_meta(h["metadata"])
-            m["chunk_type"] = "hyq"
-            m["parent_id"] = h["parent_id"]
-            m["is_hyq"] = True
-            q_metas.append(m)
-        q_emb = encode_documents(config, q_docs)
-        ids += q_ids
-        docs += q_docs
-        metas += q_metas
-        embeddings += q_emb
-
-    collection.add(ids=ids, embeddings=embeddings, documents=docs, metadatas=metas)
+        m["doc_id"] = u["id"]
+        points.append(PointStruct(id=idx, vector=emb, payload=m))
+    client.upsert(collection_name=collection_name, points=points)
+    client.close()  # 로컬 모드는 디스크 락을 잡으므로 명시적으로 해제
 
 
 # ---------------------------------------------------------------------------
@@ -204,63 +187,18 @@ def save_parents(config: dict[str, Any], parents: dict[str, dict[str, Any]]) -> 
 
 
 # ---------------------------------------------------------------------------
-# 가상 질문 인덱싱 (옵션, 로컬 LLM 필요)
-# ---------------------------------------------------------------------------
-def generate_hypothetical_questions(
-    config: dict[str, Any], search_units: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """각 검색 단위가 답이 되는 가상 질문을 로컬 LLM으로 생성한다.
-
-    로컬 LLM(Ollama)이 아직 없으면 경고 후 빈 리스트를 반환해 인덱싱을 막지 않는다.
-    step 4에서 LLM 구동 후 재빌드하면 가상 질문 벡터가 포함된다.
-    """
-    if not config["indexing"]["hypothetical_questions"]:
-        return []
-
-    from src.generation import generate, is_backend_available
-
-    if not is_backend_available(config):
-        print("[경고] 로컬 LLM 미구동 — 가상 질문 인덱싱을 건너뜁니다. "
-              "step 4에서 LLM 구동 후 build_index를 다시 실행하세요.")
-        return []
-
-    hyq: list[dict[str, Any]] = []
-    for u in search_units:
-        prompt = (
-            "다음 사내 규정 조항을 읽고, 이 조항이 정답이 될 수 있는 "
-            "일상어 질문 1개만 생성하세요. 질문만 출력하세요.\n\n"
-            f"[조항]\n{u['text']}"
-        )
-        question = generate(config, prompt).strip()
-        if not question:
-            continue
-        hyq.append(
-            {
-                "id": f"{u['id']}-hyq",
-                "text": question,
-                "parent_id": u.get("parent_id", u["id"]),
-                "metadata": dict(u["metadata"]),
-            }
-        )
-    return hyq
-
-
-# ---------------------------------------------------------------------------
 # 엔트리
 # ---------------------------------------------------------------------------
 def run(config: dict[str, Any]) -> dict[str, int]:
-    """인덱싱 실행: 청크 로드 -> 벡터 색인 + BM25 + parent lookup (+ 가상질문)."""
+    """인덱싱 실행: 청크 로드 -> 벡터 색인 + BM25 + parent lookup."""
     chunks = load_chunks(config["paths"]["chunks_path"])
     search_units, parents = split_search_and_parents(chunks)
 
-    hyq = generate_hypothetical_questions(config, search_units)
-
-    build_vector_index(config, search_units, hyq)
+    build_vector_index(config, search_units)
     build_bm25(config, search_units)
     save_parents(config, parents)
 
     return {
         "search_units": len(search_units),
         "parents": len(parents),
-        "hypothetical_questions": len(hyq),
     }

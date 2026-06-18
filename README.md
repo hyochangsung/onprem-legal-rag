@@ -38,7 +38,7 @@ llmagent-pjt/
 ├── src/
 │   ├── config.py                   # YAML 2층 병합 로더 + 시드 고정
 │   ├── chunking.py                 # 편-장-절-조-항 파서, Parent-Child, 표 요약
-│   ├── indexing.py                 # 임베딩→Chroma, BM25 통계, 가상질문 인덱싱
+│   ├── indexing.py                 # 임베딩→Qdrant, BM25 통계
 │   ├── retrieval.py                # BM25+벡터, RRF, 메타필터, 리랭커
 │   ├── generation.py               # 로컬 LLM(Ollama) 답변 생성
 │   └── evaluation.py               # Hit Rate@k, MRR, 답변 채점
@@ -48,7 +48,7 @@ llmagent-pjt/
 │   └── run_experiment.py           # 평가셋 전체 실행 + 결과표 누적
 ├── tests/                          # 단계별 단위 테스트
 ├── results/                        # 실험 결과표 (gitignore되지 않음, 누적)
-├── vectorstore/                    # Chroma 영속화 (gitignore)
+├── vectorstore/                    # Qdrant 영속화 (로컬 파일 임베디드 모드, gitignore)
 └── requirements.txt
 ```
 
@@ -62,7 +62,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-로컬 LLM(답변 생성·가상질문 인덱싱·답변 채점에 필요)은 [Ollama](https://ollama.com)를 사용합니다.
+로컬 LLM(답변 생성·답변 채점에 필요)은 [Ollama](https://ollama.com)를 사용합니다.
 
 ```bash
 ollama serve                       # 백엔드 구동
@@ -94,8 +94,6 @@ python scripts/build_index.py
 python scripts/build_index.py --config config/experiments/exp4_embedding.yaml
 ```
 
-> 가상 질문 인덱싱을 색인에 포함하려면 **Ollama를 먼저 띄운 뒤** 빌드해야 합니다(미구동 시 자동 스킵).
-
 ### 4.2 질문 1개 실행 (수동 확인)
 
 ```bash
@@ -122,7 +120,7 @@ python scripts/run_experiment.py --label baseline --judge               # 답변
 - `config/default.yaml` — 모든 변수의 기준값(baseline)
 - `config/experiments/*.yaml` — 이번 실험에서 **바뀌는 변수만** 오버라이드 (default 위에 깊은 병합)
 
-주요 실험 변수: 임베딩 모델, RRF sparse/dense 가중치, top-k, 리랭커 on/off·모델, 청킹 방식(조 단위 단일 vs Parent-Child), 가상질문 인덱싱 on/off.
+주요 실험 변수: 임베딩 모델, RRF sparse/dense 가중치, top-k, 리랭커 on/off·모델, 청킹 방식(조 단위 단일 vs Parent-Child).
 
 ---
 
@@ -150,11 +148,11 @@ python tests/test_evaluation.py
 ## 8. 남은 작업 (TODO)
 
 ### 데이터·환경 (선행 조건)
-- [ ] **전체 규정집 확정** — 현재 `data/raw/regulations.md`는 14개 조(제1편 제1~2장)만 포함된 샘플. 본문이 제56조 등 뒷부분을 참조하므로 전체본으로 교체 필요. 교체 시 조 번호 연속성 재확인.
-- [ ] **평가셋 확장·정제** — 현재 24문항(14개 조 기준). 전체 규정집 확정 후 약 50문항으로 확장하고 정답 근거 재검수.
+- [x] **전체 규정집 확정** — `data/raw/regulations.md`를 100조 전체본으로 교체 완료.
+- [x] **평가셋 확장·정제** — 24문항(14개 조)에서 76문항(편2~5의 26개 절을 절당 2문항씩 커버)으로 확장. 100개 조 중 66개 조를 정답 근거로 직접 다룸.
 
 ### 파이프라인 완성
-- [ ] **가상 질문 인덱싱 색인 반영** — 코드는 있으나 현재 색인엔 0개. Ollama 구동 후 `build_index.py` 재실행하여 색인에 포함.
+- [ ] **인덱스 최초 빌드** — `data/processed/`, `vectorstore/`가 아직 비어 있어 한 번도 빌드되지 않음. `build_index.py` 실행 + 100조 전체에서 청킹 파서가 정상 동작하는지 확인 필요.
 - [ ] **리랭커 모델 지정** — `config`의 `retrieval.reranker.model`이 비어 있어 현재 재정렬 스킵. 한국어 cross-encoder 모델 선정 후 지정(실험3).
 - [ ] **RAGAS 정식 연동** — 설치 완료(ragas 0.4.3). 다만 기본 심판·임베딩이 외부 API(OpenAI)라 온프레미스에선 그대로 못 씀. 로컬 LLM·로컬 임베딩으로 배선해야 사용 가능. 그 전까지 답변 품질은 로컬 LLM 심판 채점(`--judge`)으로 대체.
 
